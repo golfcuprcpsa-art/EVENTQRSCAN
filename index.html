@@ -27,24 +27,29 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
   .result{font-size:16px}
   .name{font-size:25px}
 }
+
+.compact-controls{gap:8px;margin-top:8px}
+.compact-controls button{width:auto;flex:1;margin-top:0;padding:11px}
+.payment-stop{font-size:24px;font-weight:900;margin:8px 0}
+.payment-instruction{font-size:17px;font-weight:700}
+@media(max-width:600px){
+  .compact-controls{display:none}
+  .compact-controls[style*="block"]{display:flex!important}
+  .manual{margin-top:12px;padding-top:12px}
+}
 </style>
 </head>
 <body>
 <div class="wrap"><div class="card">
 <h1>THE OLIVAREZ GOLF CUP 2026</h1>
 <h2>QR ATTENDANCE SCANNER</h2>
-<div style="display:flex;gap:8px;margin:8px 0 14px">
-  <div style="flex:1;text-align:center;background:#eef3f8;padding:9px;border-radius:10px"><b id="sessionCount" style="display:block;font-size:20px">0</b><span style="font-size:11px">SESSION CHECK-INS</span></div>
-  <div style="flex:1;text-align:center;background:#eef3f8;padding:9px;border-radius:10px"><b id="scanCount" style="display:block;font-size:20px">0</b><span style="font-size:11px">QR READS</span></div>
-</div>
+
 <div id="result" class="result"></div>
 <div id="debug" class="debug"></div>
 <button id="nextBtn" class="primary" style="display:none;background:#176b2c" onclick="scanNextPlayer()">▶ SCAN NEXT PLAYER</button>
 <div id="reader"></div>
 <button id="startBtn" class="primary" onclick="startCamera()">📷 START CAMERA</button>
-<div id="controls" class="controls">
-<select id="cameraSelect" onchange="chooseCamera(this.value)"></select>
-<button class="secondary" onclick="searchCameras()">🔍 SEARCH CAMERAS</button>
+<div id="controls" class="controls compact-controls">
 <button id="switchBtn" class="secondary" onclick="switchCamera()">🔄 SWITCH CAMERA</button>
 <button class="stop" onclick="stopCamera()">■ STOP CAMERA</button>
 </div>
@@ -63,14 +68,13 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
 // Replace ONLY the SCANNER_KEY value below with the exact
 // scannerKey you placed in Code.gs.
 // ============================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyryNn2izH_oy4FjW3oKpN_VSnwp4EKd3fM0JWltR_qkBYyhU6GozXoUPMQZVoJrog-/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyGHyVpadT0ZUnalxitghYKvunc1NaRwjs7Z0O3_WN2VTwYkf7GA-ThwSHGrp7-a7lS/exec";
 // ============================================================
 
-let qr=null,cameras=[],current=0,busy=false,lastCode="",lastTime=0,scanCount=0,sessionCount=0;
+let qr=null,cameras=[],current=0,busy=false,lastCode="",lastTime=0;
 
 function setResult(cls,html){const r=document.getElementById("result");r.className="result "+cls;r.innerHTML=html;r.style.display="block"}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function updateStats(){document.getElementById("scanCount").textContent=scanCount;document.getElementById("sessionCount").textContent=sessionCount}
 function tone(ok){try{const A=window.AudioContext||window.webkitAudioContext,c=new A(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=ok?880:240;g.gain.setValueAtTime(.1,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.18);o.start();o.stop(c.currentTime+.18)}catch(e){}}
 
 
@@ -100,10 +104,8 @@ async function searchCameras(open=true){
 }
 
 function fillCameraList(){
- const s=document.getElementById("cameraSelect");s.innerHTML="";
- cameras.forEach((c,i)=>{const o=document.createElement("option");o.value=i;o.textContent=c.label||("Camera "+(i+1));o.selected=i===current;s.appendChild(o)});
- document.getElementById("controls").style.display=cameras.length?"block":"none";
- document.getElementById("switchBtn").style.display=cameras.length>1?"block":"none";
+  document.getElementById("controls").style.display=cameras.length?"flex":"none";
+  document.getElementById("switchBtn").style.display=cameras.length>1?"block":"none";
 }
 
 async function openCamera(){
@@ -121,7 +123,6 @@ async function openCamera(){
  }catch(e){cameraError(e)}
 }
 
-async function chooseCamera(i){current=Number(i);await openCamera()}
 async function switchCamera(){if(cameras.length<2)return;current=(current+1)%cameras.length;fillCameraList();await openCamera()}
 async function stopCamera(){document.getElementById("nextBtn").style.display="none";try{if(qr&&qr.isScanning)await qr.stop();if(qr)qr.clear()}catch(e){}document.getElementById("startBtn").style.display="block";document.getElementById("controls").style.display="none";setResult("info","Camera stopped.")}
 
@@ -132,7 +133,7 @@ function checkPlayer(raw,fromQr=false){
  const now=Date.now();if(busy||(code===lastCode&&now-lastTime<3500))return;
  busy=true;lastCode=code;lastTime=now;
  if(fromQr){
-   scanCount++;updateStats();
+   
    try{if(qr&&qr.isScanning)qr.pause(true)}catch(e){}
  }
  if(navigator.vibrate)navigator.vibrate(80);
@@ -151,9 +152,19 @@ callback:cb});
 }
 
 function displayResult(d){
- if(d.ok){sessionCount++;updateStats();tone(true);
+ if(d.ok){tone(true);
    setResult("success","<b>✅ "+esc(d.message)+"</b><div class='name'>"+esc(d.name)+"</div>"+esc(d.id)+"<br>"+esc(d.type||"")+(d.sponsor?"<br>"+esc(d.sponsor):"")+"<br><b>PAYMENT: "+esc(d.payment||"")+"</b><br>Check-in: "+esc(d.time||""));
- }else if(d.status==="duplicate"){tone(false);
+ }else if(d.status==="payment_required" || d.status==="unpaid"){
+    tone(false);if(navigator.vibrate)navigator.vibrate([180,80,180]);
+    setResult("unpaid",
+      "<div class='payment-stop'>⛔ NOT CHECKED IN</div>"+
+      "<div class='name'>"+esc(d.name||"")+"</div>"+
+      "<div class='id'>"+esc(d.id||"")+"</div>"+
+      "<div class='payment'>PAYMENT: UNPAID</div>"+
+      "<div class='payment-instruction'>Please proceed to the PAYMENT AREA first.</div>"+
+      "<div style='margin-top:8px'>After payment is confirmed in the Registration sheet, scan the QR code again.</div>"
+    );
+  }else if(d.status==="duplicate"){tone(false);
    setResult("duplicate","<b>⚠️ "+esc(d.message)+"</b><div class='name'>"+esc(d.name)+"</div>"+esc(d.id)+"<br>First check-in: "+esc(d.firstCheckIn||""));
  }else{
    tone(false);
