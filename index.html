@@ -13,10 +13,20 @@ h1{text-align:center;font-size:22px;margin:4px 0} h2{text-align:center;font-size
 button,input,select{width:100%;padding:14px;margin-top:10px;border-radius:11px;font-size:16px}
 button{border:0;font-weight:700;cursor:pointer}.primary{background:#17365d;color:white}.secondary{background:#e8eef6;color:#17365d}.stop{background:#8d2020;color:white}
 input,select{border:1px solid #bbb;background:white}.controls{display:none}
-.result{display:none;margin-top:14px;padding:16px;border-radius:12px;text-align:center;line-height:1.5}
+.result{display:none;margin:10px 0 12px;padding:16px;border-radius:12px;text-align:center;line-height:1.5;position:sticky;top:8px;z-index:50;box-shadow:0 4px 14px #0002}
 .info{display:block;background:#e7eff8}.success{display:block;background:#dff3e4;color:#176b2c}.duplicate{display:block;background:#fff3cd;color:#725000}.error{display:block;background:#fde5e5;color:#9b0000}
 .name{font-size:24px;font-weight:700;margin:8px}.manual{border-top:1px solid #ddd;margin-top:18px;padding-top:16px}
 .small{font-size:13px;line-height:1.5;color:#667}.debug{font-size:11px;color:#777;word-break:break-word;margin-top:8px}
+
+@media(max-width:600px){
+  body{padding:8px}
+  .card{padding:14px;border-radius:16px}
+  h1{font-size:20px}
+  #reader{max-height:48vh}
+  #reader video{max-height:48vh!important;object-fit:cover!important}
+  .result{font-size:16px}
+  .name{font-size:25px}
+}
 </style>
 </head>
 <body>
@@ -27,6 +37,9 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
   <div style="flex:1;text-align:center;background:#eef3f8;padding:9px;border-radius:10px"><b id="sessionCount" style="display:block;font-size:20px">0</b><span style="font-size:11px">SESSION CHECK-INS</span></div>
   <div style="flex:1;text-align:center;background:#eef3f8;padding:9px;border-radius:10px"><b id="scanCount" style="display:block;font-size:20px">0</b><span style="font-size:11px">QR READS</span></div>
 </div>
+<div id="result" class="result"></div>
+<div id="debug" class="debug"></div>
+<button id="nextBtn" class="primary" style="display:none;background:#176b2c" onclick="scanNextPlayer()">▶ SCAN NEXT PLAYER</button>
 <div id="reader"></div>
 <button id="startBtn" class="primary" onclick="startCamera()">📷 START CAMERA</button>
 <div id="controls" class="controls">
@@ -35,8 +48,6 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
 <button id="switchBtn" class="secondary" onclick="switchCamera()">🔄 SWITCH CAMERA</button>
 <button class="stop" onclick="stopCamera()">■ STOP CAMERA</button>
 </div>
-<div id="result" class="result"></div>
-<div id="debug" class="debug"></div>
 <div class="manual">
 <b>Backup Check-In</b>
 <div class="small">Enter the Player ID if camera scanning is unavailable.</div>
@@ -52,7 +63,7 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
 // Replace ONLY the SCANNER_KEY value below with the exact
 // scannerKey you placed in Code.gs.
 // ============================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbzui9-hOvPrIIp84fx797sTTusDNRVHOWtUUqVmuZ4CH4FHosO50ekH5n9ygphRkIBq/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyryNn2izH_oy4FjW3oKpN_VSnwp4EKd3fM0JWltR_qkBYyhU6GozXoUPMQZVoJrog-/exec";
 // ============================================================
 
 let qr=null,cameras=[],current=0,busy=false,lastCode="",lastTime=0,scanCount=0,sessionCount=0;
@@ -97,12 +108,13 @@ function fillCameraList(){
 
 async function openCamera(){
  try{
+   document.getElementById("nextBtn").style.display="none";
    if(qr){try{if(qr.isScanning)await qr.stop()}catch(e){} try{qr.clear()}catch(e){}}
    qr=new Html5Qrcode("reader");
    const cam=cameras[current]; if(!cam)throw new Error("Selected camera is unavailable.");
    setResult("info","Opening "+esc(cam.label||"camera")+"...");
    await qr.start(cam.id,{fps:12,qrbox:(w,h)=>{const x=Math.floor(Math.min(w,h)*.7);return{width:x,height:x}},aspectRatio:1},
-     text=>{scanCount++;updateStats();checkPlayer(text)},()=>{});
+     text=>checkPlayer(text,true),()=>{});
    document.getElementById("startBtn").style.display="none";
    document.getElementById("controls").style.display="block";
    setResult("info","Camera ready — scan a player QR code.");
@@ -111,14 +123,20 @@ async function openCamera(){
 
 async function chooseCamera(i){current=Number(i);await openCamera()}
 async function switchCamera(){if(cameras.length<2)return;current=(current+1)%cameras.length;fillCameraList();await openCamera()}
-async function stopCamera(){try{if(qr&&qr.isScanning)await qr.stop();if(qr)qr.clear()}catch(e){}document.getElementById("startBtn").style.display="block";document.getElementById("controls").style.display="none";setResult("info","Camera stopped.")}
+async function stopCamera(){document.getElementById("nextBtn").style.display="none";try{if(qr&&qr.isScanning)await qr.stop();if(qr)qr.clear()}catch(e){}document.getElementById("startBtn").style.display="block";document.getElementById("controls").style.display="none";setResult("info","Camera stopped.")}
 
-function manualCheckIn(){const e=document.getElementById("manualCode"),v=e.value.trim();if(!v)return setResult("error","<b>Enter a Player ID.</b>");e.value="";checkPlayer(v)}
+function manualCheckIn(){const e=document.getElementById("manualCode"),v=e.value.trim();if(!v)return setResult("error","<b>Enter a Player ID.</b>");e.value="";checkPlayer(v,false)}
 
-function checkPlayer(raw){
+function checkPlayer(raw,fromQr=false){
  const code=String(raw||"").trim().toUpperCase();if(!code)return;
  const now=Date.now();if(busy||(code===lastCode&&now-lastTime<3500))return;
-busy=true;lastCode=code;lastTime=now;if(navigator.vibrate)navigator.vibrate(80);
+ busy=true;lastCode=code;lastTime=now;
+ if(fromQr){
+   scanCount++;updateStats();
+   try{if(qr&&qr.isScanning)qr.pause(true)}catch(e){}
+ }
+ if(navigator.vibrate)navigator.vibrate(80);
+ document.getElementById("nextBtn").style.display="none";
  setResult("info","Checking "+esc(code)+"...");
  const cb="ogc_"+Date.now()+"_"+Math.floor(Math.random()*100000);
  const tag=document.createElement("script");
@@ -141,7 +159,25 @@ function displayResult(d){
    tone(false);
    setResult("error","<b>❌ "+esc(d.message||"CHECK-IN FAILED")+"</b><br>"+esc(d.id||""));
  }
- setTimeout(()=>{busy=false},2500);
+ busy=false;
+ const next=document.getElementById("nextBtn");
+ if(qr&&qr.isScanning){ next.style.display="block"; }
+ else { next.style.display="none"; }
+}
+function scanNextPlayer(){
+ lastCode="";lastTime=0;busy=false;
+ document.getElementById("nextBtn").style.display="none";
+ try{
+   if(qr&&qr.isScanning){
+     qr.resume();
+     setResult("info","Camera ready — scan the next player QR code.");
+   }else{
+     setResult("info","Press START CAMERA to scan the next player.");
+   }
+ }catch(e){
+   setResult("error","<b>CAMERA ERROR</b><br>Could not resume camera. Press START CAMERA.");
+   document.getElementById("startBtn").style.display="block";
+ }
 }
 
 function cameraError(e){
