@@ -37,6 +37,33 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
   .compact-controls[style*="block"]{display:flex!important}
   .manual{margin-top:12px;padding-top:12px}
 }
+
+/* MOBILE-ONLY LAYOUT OPTIMIZATION — scanning logic unchanged */
+@media (max-width:600px){
+  body{padding:5px}
+  .wrap{max-width:100%}
+  .card{padding:10px;border-radius:12px}
+  h1{font-size:17px;line-height:1.15;margin:2px 0}
+  h2{font-size:11px;margin:3px 0 7px}
+  .result{padding:9px 10px;margin:5px 0 7px;line-height:1.25;
+          border-radius:10px;top:4px;font-size:14px}
+  .result .name{font-size:21px;margin:3px 0}
+  .result .payment{font-size:18px;margin:4px 0}
+  .result .payment-stop{font-size:19px;margin:3px 0}
+  .result .payment-instruction{font-size:14px}
+  #nextBtn{padding:13px 8px;margin:5px 0 7px;font-size:17px;
+           position:sticky;top:4px;z-index:51}
+  #reader{max-height:36vh;border-radius:10px}
+  #reader video{max-height:36vh!important;object-fit:contain!important}
+  button,input{font-size:14px;padding:10px;margin-top:6px}
+  .compact-controls{display:none;gap:6px;margin-top:6px}
+  .compact-controls[style*="block"],.compact-controls[style*="flex"]{display:flex!important}
+  .compact-controls button{min-width:0;flex:1;padding:9px 5px;font-size:12px;
+                            white-space:nowrap}
+  .manual{margin-top:8px;padding-top:8px}
+  .manual .small{font-size:11px}
+  .debug{margin-top:4px}
+}
 </style>
 </head>
 <body>
@@ -68,7 +95,7 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
 // Replace ONLY the SCANNER_KEY value below with the exact
 // scannerKey you placed in Code.gs.
 // ============================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyGHyVpadT0ZUnalxitghYKvunc1NaRwjs7Z0O3_WN2VTwYkf7GA-ThwSHGrp7-a7lS/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyryNn2izH_oy4FjW3oKpN_VSnwp4EKd3fM0JWltR_qkBYyhU6GozXoUPMQZVoJrog-/exec";
 // ============================================================
 
 let qr=null,cameras=[],current=0,busy=false,lastCode="",lastTime=0;
