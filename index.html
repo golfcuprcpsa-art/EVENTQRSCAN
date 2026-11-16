@@ -53,8 +53,8 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
   .result .payment-instruction{font-size:14px}
   #nextBtn{padding:13px 8px;margin:5px 0 7px;font-size:17px;
            position:sticky;top:4px;z-index:51}
-  #reader{max-height:36vh;border-radius:10px}
-  #reader video{max-height:36vh!important;object-fit:contain!important}
+  #reader{max-height:44vh;border-radius:10px}
+  #reader video{max-height:44vh!important;object-fit:contain!important}
   button,input{font-size:14px;padding:10px;margin-top:6px}
   .compact-controls{display:none;gap:6px;margin-top:6px}
   .compact-controls[style*="block"],.compact-controls[style*="flex"]{display:flex!important}
@@ -99,6 +99,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyGHyVpadT0ZUnalxitghYK
 // ============================================================
 
 let qr=null,cameras=[],current=0,busy=false,lastCode="",lastTime=0;
+let scanFailures=0,scanStartedAt=0;
 
 function setResult(cls,html){const r=document.getElementById("result");r.className="result "+cls;r.innerHTML=html;r.style.display="block"}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -138,13 +139,19 @@ async function openCamera(preferRear=true){
   }
   document.getElementById("reader").innerHTML="";
   qr=new Html5Qrcode("reader",{verbose:false});
-  const config={fps:10,qrbox:(w,h)=>{const side=Math.max(120,Math.floor(Math.min(w,h)*0.7));return {width:side,height:side}},
-    disableFlip:false};
-  const onScan=text=>checkPlayer(text,true);
+  // Larger scanning window and native video aspect ratio improve QR detection on iOS.
+  const config={fps:15, qrbox:(w,h)=>{
+    const side=Math.floor(Math.min(w,h)*0.9);
+    return {width:side,height:side};
+  }, disableFlip:false, videoConstraints:{width:{ideal:1280},height:{ideal:720}}};
+  const onScan=text=>{scanFailures=0;checkPlayer(text,true)};
+  const onFailure=()=>{scanFailures++;if(scanFailures===100 && !busy){
+    document.getElementById("debug").textContent="QR not detected yet. Hold the code 15–25 cm away, ensure good lighting, and keep the whole code visible.";
+  }};
   // facingMode works more consistently on iOS than an enumerated deviceId.
   const requested=preferRear?{facingMode:"environment"}:(cameras[current]?.id||{facingMode:"user"});
   try{
-    await qr.start(requested,config,onScan,()=>{});
+    await qr.start(requested,config,onScan,onFailure);
   }catch(firstError){
     if(!preferRear)throw firstError;
     // Fallback for older Safari devices that cannot resolve facingMode.
@@ -155,12 +162,13 @@ async function openCamera(preferRear=true){
     current=rear>=0?rear:cameras.length-1;
     try{qr.clear()}catch(e){}
     qr=new Html5Qrcode("reader",{verbose:false});
-    await qr.start(cameras[current].id,config,onScan,()=>{});
+    await qr.start(cameras[current].id,config,onScan,onFailure);
   }
   document.getElementById("startBtn").style.display="none";
   document.getElementById("controls").style.display="flex";
   document.getElementById("nextBtn").style.display="none";
-  setResult("info","Camera ready — scan a player QR code.");
+  scanFailures=0;scanStartedAt=Date.now();
+  setResult("info","Camera ready — hold the full QR code steady in the scanning area.");
   // Enumerate only after Safari grants permission; labels may initially be blank.
   try{cameras=(await Html5Qrcode.getCameras())||[];fillCameraList()}catch(e){}
 }
