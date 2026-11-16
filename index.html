@@ -75,6 +75,9 @@ input,select{border:1px solid #bbb;background:white}.controls{display:none}
 <div id="debug" class="debug"></div>
 <button id="nextBtn" class="primary" style="display:none;background:#176b2c" onclick="scanNextPlayer()">▶ SCAN NEXT PLAYER</button>
 <div id="reader"></div>
+<label for="cameraChoice" class="small" style="display:block;margin-top:8px">Camera selection (iPhone)</label>
+<select id="cameraChoice" onchange="selectCamera()"><option value="rear">Rear camera (preferred)</option><option value="front">Front camera</option></select>
+<button class="secondary" id="refreshCameras" onclick="refreshCameraList()">↻ FIND AVAILABLE CAMERAS</button>
 <button id="startBtn" class="primary" onclick="startCamera()">📷 START CAMERA</button>
 <div id="controls" class="controls compact-controls">
 <button id="switchBtn" class="secondary" onclick="switchCamera()">🔄 SWITCH CAMERA</button>
@@ -106,99 +109,96 @@ function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 function tone(ok){try{const A=window.AudioContext||window.webkitAudioContext,c=new A(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=ok?880:240;g.gain.setValueAtTime(.1,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.18);o.start();o.stop(c.currentTime+.18)}catch(e){}}
 
 
-// iOS-compatible camera lifecycle: request the rear camera directly first.
+// iOS camera selection: explicit camera IDs plus rear/front fallback.
 let cameraOpening=false;
-let activeFacing="environment";
+let activeChoice="rear";
+let availableCameras=[];
+const camSelect=()=>document.getElementById("cameraChoice");
+function cameraConfig(){return {
+  fps:10,
+  qrbox:(w,h)=>{const side=Math.max(140,Math.floor(Math.min(w,h)*0.82));return {width:side,height:side}},
+  disableFlip:false
+}}
+async function enumerateCameras(){
+  availableCameras=(await Html5Qrcode.getCameras())||[];
+  const select=camSelect(), prior=select.value;
+  select.innerHTML='<option value="rear">Rear camera (preferred)</option><option value="front">Front camera</option>';
+  availableCameras.forEach((c,i)=>{
+    const o=document.createElement('option');o.value='id:'+c.id;
+    o.textContent=(c.label||('Camera '+(i+1)))+' (device '+(i+1)+')';
+    select.appendChild(o);
+  });
+  select.value=Array.from(select.options).some(o=>o.value===prior)?prior:'rear';
+  document.getElementById('debug').textContent='Cameras reported by Safari: '+availableCameras.length+'. If rear/front fails, try each numbered device.';
+}
+async function refreshCameraList(){
+  try{await enumerateCameras()}catch(e){cameraError(e)}
+}
 async function startCamera(){
   if(cameraOpening)return;
   cameraOpening=true;
-  document.getElementById("debug").textContent="";
   try{
-    if(!window.isSecureContext)throw new Error("Camera requires HTTPS. Open the GitHub Pages https:// link in Safari.");
-    if(!navigator.mediaDevices?.getUserMedia)throw new Error("Camera API unavailable. Open this page directly in Safari, not inside an app's browser.");
-    if(typeof Html5Qrcode==="undefined")throw new Error("QR library did not load. Check your internet connection.");
-    setResult("info","Opening rear camera...");
-    await openCamera("environment");
-  }catch(e){cameraError(e)}
-  finally{cameraOpening=false}
+    if(!window.isSecureContext)throw Error('Open the HTTPS GitHub Pages link directly in Safari.');
+    if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera API unavailable. Open directly in Safari.');
+    if(typeof Html5Qrcode==='undefined')throw Error('QR scanning library failed to load.');
+    // Safari may hide device labels until permission has been granted.
+    await launchCamera(camSelect().value||'rear');
+    try{await enumerateCameras()}catch(e){}
+  }catch(e){cameraError(e)}finally{cameraOpening=false}
 }
-async function searchCameras(open=true){
-  try{
-    cameras=(await Html5Qrcode.getCameras())||[];
-    fillCameraList();
-    if(open)await startCamera();
-  }catch(e){cameraError(e)}
-}
-function fillCameraList(){
-  document.getElementById("switchBtn").style.display="block"; // iOS may report only one device even when both cameras exist
-}
-async function openCamera(facing="environment"){
-  if(qr){
-    try{if(qr.isScanning)await qr.stop()}catch(e){}
-    try{qr.clear()}catch(e){}
-    qr=null;
+async function launchCamera(choice){
+  if(qr){try{if(qr.isScanning)await qr.stop()}catch(e){}try{qr.clear()}catch(e){}qr=null}
+  document.getElementById('reader').innerHTML='';
+  const preferred=choice==='rear'?{facingMode:{exact:'environment'}}:
+    choice==='front'?{facingMode:{exact:'user'}}:choice.startsWith('id:')?choice.slice(3):{facingMode:'environment'};
+  const fallbacks=[];
+  if(choice==='rear')fallbacks.push({facingMode:'environment'});
+  if(choice==='front')fallbacks.push({facingMode:'user'});
+  if(choice==='rear'){
+    const rear=availableCameras.find(c=>/back|rear|environment|wide|world/i.test(c.label||''));
+    if(rear)fallbacks.push(rear.id);
   }
-  document.getElementById("reader").innerHTML="";
-  qr=new Html5Qrcode("reader",{verbose:false});
-  // Larger scanning window and native video aspect ratio improve QR detection on iOS.
-  const config={fps:15, qrbox:(w,h)=>{
-    const side=Math.floor(Math.min(w,h)*0.9);
-    return {width:side,height:side};
-  }, disableFlip:false};
-  const onScan=text=>{scanFailures=0;checkPlayer(text,true)};
-  const onFailure=()=>{scanFailures++;if(scanFailures===100 && !busy){
-    document.getElementById("debug").textContent="QR not detected yet. Hold the code 15–25 cm away, ensure good lighting, and keep the whole code visible.";
-  }};
-  // Safari: request front/rear explicitly, not by camera list position.
-  // Try the requested facing mode, then a matching device ID if necessary.
-  const requested={facingMode:facing};
-  try{
-    await qr.start(requested,config,onScan,onFailure);
-  }catch(firstError){
-    cameras=(await Html5Qrcode.getCameras())||[];
-    fillCameraList();
-    const pattern=facing==="environment"?/back|rear|environment|world/i:/front|face|user/i;
-    const match=cameras.find(c=>pattern.test(c.label||""));
-    if(!match)throw firstError;
-    try{qr.clear()}catch(e){}
-    qr=new Html5Qrcode("reader",{verbose:false});
-    await qr.start(match.id,config,onScan,onFailure);
+  const attempts=[preferred,...fallbacks];
+  let lastError;
+  for(const camera of attempts){
+    try{
+      qr=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],useBarCodeDetectorIfSupported:true});
+      await qr.start(camera,cameraConfig(),text=>{scanFailures=0;checkPlayer(text,true)},()=>{
+        scanFailures++;
+        if(scanFailures===120&&!busy)document.getElementById('debug').textContent='QR not recognized: move the QR 15–30 cm away, clean the lens, increase lighting, or select a different camera below.';
+      });
+      lastError=null;break;
+    }catch(e){lastError=e;try{qr.clear()}catch(_){}qr=null;document.getElementById('reader').innerHTML=''}
   }
-  activeFacing=facing;
-  document.getElementById("startBtn").style.display="none";
-  document.getElementById("controls").style.display="flex";
-  document.getElementById("nextBtn").style.display="none";
-  scanFailures=0;scanStartedAt=Date.now();
-  setResult("info","Camera ready — hold the full QR code steady in the scanning area.");
-  // Enumerate only after Safari grants permission; labels may initially be blank.
-  try{cameras=(await Html5Qrcode.getCameras())||[];fillCameraList()}catch(e){}
+  if(lastError)throw lastError;
+  activeChoice=choice;
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('controls').style.display='flex';
+  document.getElementById('nextBtn').style.display='none';
+  scanFailures=0;
+  setResult('info','Camera active. Center the QR code and hold steady.');
 }
-async function switchCamera(){
+async function selectCamera(){
   if(cameraOpening||busy)return;
   cameraOpening=true;
-  const previous=activeFacing;
-  const target=previous==="environment"?"user":"environment";
-  try{
-    setResult("info","Switching to "+(target==="environment"?"rear":"front")+" camera...");
-    await openCamera(target);
-  }catch(e){
-    cameraError(e);
-    // Restore the last working camera if switching is unsupported.
-    try{await openCamera(previous)}catch(recoveryError){cameraError(recoveryError)}
-  }finally{cameraOpening=false}
+  try{setResult('info','Switching camera...');await launchCamera(camSelect().value)}
+  catch(e){cameraError(e)}finally{cameraOpening=false}
+}
+async function switchCamera(){
+  camSelect().value=activeChoice==='front'?'rear':'front';
+  await selectCamera();
 }
 async function stopCamera(){
   if(cameraOpening)return;
   cameraOpening=true;
   try{
     if(qr){if(qr.isScanning)await qr.stop();qr.clear();qr=null}
-    document.getElementById("reader").innerHTML="";
-    document.getElementById("nextBtn").style.display="none";
-    document.getElementById("startBtn").style.display="block";
-    document.getElementById("controls").style.display="none";
-    setResult("info","Camera stopped.");
-  }catch(e){cameraError(e)}
-  finally{cameraOpening=false}
+    document.getElementById('reader').innerHTML='';
+    document.getElementById('nextBtn').style.display='none';
+    document.getElementById('startBtn').style.display='block';
+    document.getElementById('controls').style.display='none';
+    setResult('info','Camera stopped.');
+  }catch(e){cameraError(e)}finally{cameraOpening=false}
 }
 
 function manualCheckIn(){const e=document.getElementById("manualCode"),v=e.value.trim();if(!v)return setResult("error","<b>Enter a Player ID.</b>");e.value="";checkPlayer(v,false)}
