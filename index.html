@@ -108,6 +108,7 @@ function tone(ok){try{const A=window.AudioContext||window.webkitAudioContext,c=n
 
 // iOS-compatible camera lifecycle: request the rear camera directly first.
 let cameraOpening=false;
+let activeFacing="environment";
 async function startCamera(){
   if(cameraOpening)return;
   cameraOpening=true;
@@ -117,7 +118,7 @@ async function startCamera(){
     if(!navigator.mediaDevices?.getUserMedia)throw new Error("Camera API unavailable. Open this page directly in Safari, not inside an app's browser.");
     if(typeof Html5Qrcode==="undefined")throw new Error("QR library did not load. Check your internet connection.");
     setResult("info","Opening rear camera...");
-    await openCamera(true);
+    await openCamera("environment");
   }catch(e){cameraError(e)}
   finally{cameraOpening=false}
 }
@@ -129,9 +130,9 @@ async function searchCameras(open=true){
   }catch(e){cameraError(e)}
 }
 function fillCameraList(){
-  document.getElementById("switchBtn").style.display=cameras.length>1?"block":"none";
+  document.getElementById("switchBtn").style.display="block"; // iOS may report only one device even when both cameras exist
 }
-async function openCamera(preferRear=true){
+async function openCamera(facing="environment"){
   if(qr){
     try{if(qr.isScanning)await qr.stop()}catch(e){}
     try{qr.clear()}catch(e){}
@@ -143,27 +144,27 @@ async function openCamera(preferRear=true){
   const config={fps:15, qrbox:(w,h)=>{
     const side=Math.floor(Math.min(w,h)*0.9);
     return {width:side,height:side};
-  }, disableFlip:false, videoConstraints:{width:{ideal:1280},height:{ideal:720}}};
+  }, disableFlip:false};
   const onScan=text=>{scanFailures=0;checkPlayer(text,true)};
   const onFailure=()=>{scanFailures++;if(scanFailures===100 && !busy){
     document.getElementById("debug").textContent="QR not detected yet. Hold the code 15–25 cm away, ensure good lighting, and keep the whole code visible.";
   }};
-  // facingMode works more consistently on iOS than an enumerated deviceId.
-  const requested=preferRear?{facingMode:"environment"}:(cameras[current]?.id||{facingMode:"user"});
+  // Safari: request front/rear explicitly, not by camera list position.
+  // Try the requested facing mode, then a matching device ID if necessary.
+  const requested={facingMode:facing};
   try{
     await qr.start(requested,config,onScan,onFailure);
   }catch(firstError){
-    if(!preferRear)throw firstError;
-    // Fallback for older Safari devices that cannot resolve facingMode.
     cameras=(await Html5Qrcode.getCameras())||[];
     fillCameraList();
-    if(!cameras.length)throw firstError;
-    const rear=cameras.findIndex(c=>/back|rear|environment|world/i.test(c.label||""));
-    current=rear>=0?rear:cameras.length-1;
+    const pattern=facing==="environment"?/back|rear|environment|world/i:/front|face|user/i;
+    const match=cameras.find(c=>pattern.test(c.label||""));
+    if(!match)throw firstError;
     try{qr.clear()}catch(e){}
     qr=new Html5Qrcode("reader",{verbose:false});
-    await qr.start(cameras[current].id,config,onScan,onFailure);
+    await qr.start(match.id,config,onScan,onFailure);
   }
+  activeFacing=facing;
   document.getElementById("startBtn").style.display="none";
   document.getElementById("controls").style.display="flex";
   document.getElementById("nextBtn").style.display="none";
@@ -173,15 +174,18 @@ async function openCamera(preferRear=true){
   try{cameras=(await Html5Qrcode.getCameras())||[];fillCameraList()}catch(e){}
 }
 async function switchCamera(){
-  if(cameraOpening)return;
+  if(cameraOpening||busy)return;
   cameraOpening=true;
+  const previous=activeFacing;
+  const target=previous==="environment"?"user":"environment";
   try{
-    if(!cameras.length)cameras=(await Html5Qrcode.getCameras())||[];
-    if(cameras.length<2){setResult("info","Only one camera is available.");return}
-    current=(current+1)%cameras.length;
-    await openCamera(false);
-  }catch(e){cameraError(e)}
-  finally{cameraOpening=false}
+    setResult("info","Switching to "+(target==="environment"?"rear":"front")+" camera...");
+    await openCamera(target);
+  }catch(e){
+    cameraError(e);
+    // Restore the last working camera if switching is unsupported.
+    try{await openCamera(previous)}catch(recoveryError){cameraError(recoveryError)}
+  }finally{cameraOpening=false}
 }
 async function stopCamera(){
   if(cameraOpening)return;
